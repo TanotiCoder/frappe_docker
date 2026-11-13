@@ -1,0 +1,52 @@
+# syntax=docker/dockerfile:1
+# Builds a Frappe + sme_crm image from LOCAL app source. No git, no token, no ERPNext.
+ARG FRAPPE_BRANCH=version-16
+FROM frappe/build:${FRAPPE_BRANCH} AS builder
+
+ARG FRAPPE_BRANCH=version-16
+
+USER frappe
+
+COPY --chown=frappe:0 sme_crm_src /tmp/apps/sme_crm
+
+RUN bench init \
+      --frappe-branch=${FRAPPE_BRANCH} \
+      --frappe-path=https://github.com/frappe/frappe \
+      --no-procfile \
+      --no-backups \
+      --skip-redis-config-generation \
+      --verbose \
+      /home/frappe/frappe-bench \
+ && cd /home/frappe/frappe-bench \
+ && bench get-app /tmp/apps/sme_crm \
+ && echo "{}" > sites/common_site_config.json \
+ && find apps -mindepth 1 -path "*/.git" | xargs rm -fr \
+ && chmod -R g=u /home/frappe/frappe-bench
+
+FROM frappe/base:${FRAPPE_BRANCH} AS backend
+
+USER frappe
+
+COPY --from=builder --chown=frappe:0 /home/frappe/frappe-bench /home/frappe/frappe-bench
+
+WORKDIR /home/frappe/frappe-bench
+
+RUN chmod g=u /home/frappe/frappe-bench && \
+    cp -r /home/frappe/frappe-bench/sites/assets /home/frappe/frappe-bench/assets && \
+    rm -rf /home/frappe/frappe-bench/sites/assets
+
+VOLUME [ \
+  "/home/frappe/frappe-bench/sites", \
+  "/home/frappe/frappe-bench/logs" \
+]
+
+USER root
+COPY resources/core/main-entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod 755 /usr/local/bin/entrypoint.sh
+COPY resources/core/start.sh /usr/local/bin/start.sh
+RUN chmod 755 /usr/local/bin/start.sh
+
+USER frappe
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["start.sh"]
+
